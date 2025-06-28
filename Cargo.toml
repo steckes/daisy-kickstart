@@ -1,0 +1,34 @@
+[package]
+name = "daisy-kickstart"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cortex-m = { version = "0.7", features = [
+    "critical-section-single-core",
+] } # Hardware Abstraction Layer
+cortex-m-rt = "0.7" # Runtime Environment = Startup Code
+cortex-m-rtic = "1.1.4"
+daisy = { version = "0.11", features = ["seed_1_1"] }
+defmt = "1.0" # Logging framework
+defmt-rtt = "1.0" # Transport layer to send the logs over
+libm = "0.2.15"
+panic-probe = { version = "1.0", features = [
+    "print-defmt",
+] } # Panic handler for probe-rs
+stm32h7xx-hal = { version = "0.16", features = [
+    "stm32h750v",
+    "rt",
+    "revision_v",
+    "usb_hs",
+    "xspi",
+    "fmc",
+    "sdmmc",
+] }
+systick-monotonic = "1.0"
+
+[lib]
+harness = false # Disable built-in test framework of Rust
+
+[profile.release]
+debug = 2
