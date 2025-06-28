@@ -31,7 +31,7 @@ const MIN_CUTOFF: f32 = 20.0; // 20 Hz
 const MAX_CUTOFF: f32 = 20000.0; // 20 kHz
 
 const MIN_RESONANCE: f32 = 0.1;
-const MAX_RESONANCE: f32 = 3.0;
+const MAX_RESONANCE: f32 = 6.0;
 
 // Simple moving average for smoothing
 const SMOOTH_FACTOR: f32 = 0.9;
@@ -108,8 +108,7 @@ fn main() -> ! {
         FILTER.borrow(cs).replace(Some(filters));
     });
 
-    // Main loop: read knob and blink LED
-    let delay = ccdr.clocks.sys_ck().to_Hz() / 100;
+    // Main loop: read parameters
     loop {
         // Read ADC value
         let knob1_raw: u32 = adc1.read(&mut knob1_pin).unwrap();
@@ -131,8 +130,8 @@ fn main() -> ! {
             *resonance = *resonance * SMOOTH_FACTOR + new_resonance * (1.0 - SMOOTH_FACTOR);
         });
 
-        // update interval
-        asm::delay(delay);
+        // wait for next interrupt
+        cortex_m::asm::wfi();
     }
 }
 
