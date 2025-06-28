@@ -1,117 +1,177 @@
-//! Example of how to configure audio input output and implement a basic
-//! filter processing on left and right channels, using RTIC.
-//!
-//! Read https://rtic.rs to learn more about the framework.
+//! Audio passthrough example with heapless queue for knob messages using direct ADC readings
 
 #![no_main]
 #![no_std]
 
+use core::cell::RefCell;
+use cortex_m::asm;
+use cortex_m::interrupt::Mutex;
+use cortex_m_rt::entry;
+
+use daisy::audio;
+use daisy_kickstart::filter::{Filter, FilterParams, FilterType};
+use hal::adc;
+use hal::delay::Delay;
+use hal::pac::{self, interrupt};
+use hal::prelude::*;
+use stm32h7xx_hal as hal;
+
 use {defmt_rtt as _, panic_probe as _};
 
-#[rtic::app(device = stm32h7xx_hal::pac, peripherals = true)]
-mod app {
-    use daisy::audio::Interface;
-    use systick_monotonic::*;
+// Global audio interface
+static AUDIO_INTERFACE: Mutex<RefCell<Option<audio::Interface>>> = Mutex::new(RefCell::new(None));
 
-    // Import filter types - adjust this based on your filter implementation
-    use daisy_kickstart::filter::{Filter, FilterParams, FilterType}; // Replace with actual import
+static FILTER: Mutex<RefCell<Option<[Filter; 2]>>> = Mutex::new(RefCell::new(None));
 
-    #[monotonic(binds = SysTick, default = true)]
-    type Mono = Systick<1000>; // 1 kHz / 1 ms granularity
+// Global queue for knob messages
+static CUTOFF: Mutex<RefCell<f32>> = Mutex::new(RefCell::new(440.0));
+static RESONANCE: Mutex<RefCell<f32>> = Mutex::new(RefCell::new(0.71));
 
-    #[shared]
-    struct Shared {}
+const MIN_CUTOFF: f32 = 20.0; // 20 Hz
+const MAX_CUTOFF: f32 = 20000.0; // 20 kHz
 
-    #[local]
-    struct Local {
-        audio_interface: Interface,
-        filters: [Filter; 2], // Array of 2 filters for stereo processing
+const MIN_RESONANCE: f32 = 0.1;
+const MAX_RESONANCE: f32 = 3.0;
+
+// Simple moving average for smoothing
+const SMOOTH_FACTOR: f32 = 0.9;
+
+#[entry]
+fn main() -> ! {
+    // Acquire peripherals
+    let mut cp = cortex_m::Peripherals::take().unwrap();
+    let dp = pac::Peripherals::take().unwrap();
+
+    // Enable caches
+    cp.SCB.enable_icache();
+    cp.SCB.enable_dcache(&mut cp.CPUID);
+
+    // Initialize board
+    let board = daisy::Board::take().unwrap();
+    let ccdr = daisy::board_freeze_clocks!(board, dp);
+    let pins = daisy::board_split_gpios!(board, ccdr, dp);
+
+    // Configure ADC
+    let mut delay = Delay::new(cp.SYST, ccdr.clocks);
+    let mut adc1 = adc::Adc::adc1(
+        dp.ADC1,
+        4.MHz(),
+        &mut delay,
+        ccdr.peripheral.ADC12,
+        &ccdr.clocks,
+    )
+    .enable();
+    adc1.set_resolution(adc::Resolution::SixteenBit);
+    // Select ADC channel for the knob
+    let mut knob1_pin = pins.GPIO.PIN_21.into_analog();
+    let mut knob2_pin = pins.GPIO.PIN_15.into_analog();
+
+    // Spawn audio interface
+    let audio_interface = daisy::board_split_audio!(ccdr, pins).spawn().unwrap();
+
+    // Initialize filters
+    let mut filters = [
+        Filter::new(FilterType::Lowpass),
+        Filter::new(FilterType::Lowpass),
+    ];
+
+    filters[0]
+        .set_sample_rate(daisy::audio::FS.to_Hz() as f32)
+        .unwrap();
+    filters[1]
+        .set_sample_rate(daisy::audio::FS.to_Hz() as f32)
+        .unwrap();
+
+    // Set initial filter parameters
+    let cutoff_freq = 440.0; // 1kHz cutoff frequency (adjust as needed)
+    let resonance = 0.71; // Resonance/Q factor (adjust as needed)
+    let gain = 1.0;
+    // Update filter parameters
+    filters[0]
+        .set_params(FilterParams {
+            frequency: cutoff_freq,
+            quality: resonance,
+            gain,
+        })
+        .unwrap();
+    filters[1]
+        .set_params(FilterParams {
+            frequency: cutoff_freq,
+            quality: resonance,
+            gain,
+        })
+        .unwrap();
+
+    // Store interface and initialize queue
+    cortex_m::interrupt::free(|cs| {
+        AUDIO_INTERFACE.borrow(cs).replace(Some(audio_interface));
+        FILTER.borrow(cs).replace(Some(filters));
+    });
+
+    // Main loop: read knob and blink LED
+    let delay = ccdr.clocks.sys_ck().to_Hz() / 100;
+    loop {
+        // Read ADC value
+        let knob1_raw: u32 = adc1.read(&mut knob1_pin).unwrap();
+        let knob2_raw: u32 = adc1.read(&mut knob2_pin).unwrap();
+
+        // Convert 16-bit ADC (0..65535) to 0.0..1.0
+        let knob1_norm = knob1_raw as f32 / 65_535.0;
+        let knob2_norm = knob2_raw as f32 / 65_535.0;
+
+        let new_cutoff = MIN_CUTOFF * libm::powf(MAX_CUTOFF / MIN_CUTOFF, knob1_norm);
+        let new_resonance = MIN_RESONANCE + (MAX_RESONANCE - MIN_RESONANCE) * knob2_norm;
+
+        cortex_m::interrupt::free(|cs| {
+            let mut cutoff = CUTOFF.borrow(cs).borrow_mut();
+            // smoothing
+            *cutoff = *cutoff * SMOOTH_FACTOR + new_cutoff * (1.0 - SMOOTH_FACTOR);
+            let mut resonance = RESONANCE.borrow(cs).borrow_mut();
+            // smoothing
+            *resonance = *resonance * SMOOTH_FACTOR + new_resonance * (1.0 - SMOOTH_FACTOR);
+        });
+
+        // update interval
+        asm::delay(delay);
     }
+}
 
-    #[init]
-    fn init(cx: init::Context) -> (Shared, Local, init::Monotonics) {
-        // Get device peripherals.
-        let mut cp = cx.core;
-        let dp = cx.device;
+// DMA interrupt for audio processing
+#[interrupt]
+fn DMA1_STR1() {
+    cortex_m::interrupt::free(|cs| {
+        let cutoff = *CUTOFF.borrow(cs).borrow();
+        let resonance = *RESONANCE.borrow(cs).borrow();
 
-        // Using caches should provide a major performance boost.
-        cp.SCB.enable_icache();
-        // NOTE: Data caching requires cache management around all use of DMA.
-        // This crate already handles that for audio processing.
-        cp.SCB.enable_dcache(&mut cp.CPUID);
-
-        // Initialize the board abstraction.
-        let board = daisy::Board::take().unwrap();
-
-        // Configure board's peripherals.
-        let ccdr = daisy::board_freeze_clocks!(board, dp);
-        let pins = daisy::board_split_gpios!(board, ccdr, dp);
-        let audio_interface = daisy::board_split_audio!(ccdr, pins);
-
-        // Start audio processing and put its abstraction into a global.
-        let audio_interface = audio_interface.spawn().unwrap();
-
-        // Initialize filters
-        let mut filters = [
-            Filter::new(FilterType::Lowpass),
-            Filter::new(FilterType::Lowpass),
-        ];
-
-        // Set initial filter parameters
-        let cutoff_freq = 10_000.0; // 1kHz cutoff frequency (adjust as needed)
-        let resonance = 0.7; // Resonance/Q factor (adjust as needed)
-
-        // Update filter parameters
-        filters[0]
-            .set_params(FilterParams {
-                frequency: cutoff_freq,
-                quality: resonance,
-                gain: 1.0,
-            })
-            .unwrap();
-        filters[1]
-            .set_params(FilterParams {
-                frequency: cutoff_freq,
-                quality: resonance,
-                gain: 1.0,
-            })
-            .unwrap();
-
-        // Initialize monotonic timer.
-        let mono = Systick::new(cp.SYST, ccdr.clocks.sys_ck().to_Hz());
-
-        (
-            Shared {},
-            Local {
-                audio_interface,
-                filters,
-            },
-            init::Monotonics(mono),
-        )
-    }
-
-    // Audio is transferred from the input and to the output periodically through DMA.
-    // Every time Daisy is done transferring data, it will ask for more by triggering
-    // the DMA 1 Stream 1 interrupt.
-    #[task(binds = DMA1_STR1, local = [audio_interface, filters])]
-    fn dsp(cx: dsp::Context) {
-        let audio_interface = cx.local.audio_interface;
-        let filters = cx.local.filters;
-
-        audio_interface
-            .handle_interrupt_dma1_str1(|audio_buffer| {
-                // Process each frame through the filters
-                for frame in audio_buffer {
-                    let (left, right) = *frame;
-
-                    // Apply filters to each channel
-                    let filtered_left = filters[0].tick(left);
-                    let filtered_right = filters[1].tick(right);
-
-                    // Update the frame with filtered audio
-                    *frame = (filtered_left, filtered_right);
-                }
-            })
-            .unwrap();
-    }
+        // Process audio frames
+        if let (Some(audio_interface), Some(filters)) = (
+            AUDIO_INTERFACE.borrow(cs).borrow_mut().as_mut(),
+            FILTER.borrow(cs).borrow_mut().as_mut(),
+        ) {
+            filters[0]
+                .set_params(FilterParams {
+                    frequency: cutoff,
+                    quality: resonance,
+                    gain: 1.0,
+                })
+                .unwrap();
+            filters[1]
+                .set_params(FilterParams {
+                    frequency: cutoff,
+                    quality: resonance,
+                    gain: 1.0,
+                })
+                .unwrap();
+            audio_interface
+                .handle_interrupt_dma1_str1(|audio_buffer| {
+                    for frame in audio_buffer {
+                        let (left, right) = *frame;
+                        let left = filters[0].tick(left);
+                        let right = filters[1].tick(right);
+                        *frame = (left, right);
+                    }
+                })
+                .unwrap();
+        }
+    });
 }
