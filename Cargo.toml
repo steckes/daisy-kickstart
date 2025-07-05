@@ -8,11 +8,13 @@ cortex-m = { version = "0.7", features = [
     "critical-section-single-core",
 ] } # Hardware Abstraction Layer
 cortex-m-rt = "0.7" # Runtime Environment = Startup Code
-cortex-m-rtic = "1.1.4"
+cortex-m-rtic = "1"
 daisy = { version = "0.11", features = ["seed_1_1"] }
 defmt = "1.0" # Logging framework
 defmt-rtt = "1.0" # Transport layer to send the logs over
+heapless = "0.8.0"
 libm = "0.2.15"
+nb = "1.1.0"
 panic-probe = { version = "1.0", features = [
     "print-defmt",
 ] } # Panic handler for probe-rs

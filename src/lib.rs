@@ -6,6 +6,7 @@ use defmt_rtt as _;
 use panic_probe as _;
 
 pub mod filter;
+pub mod processor;
 
 // Custom panic handler to avoid duplicate panic messages
 // Uses defmt for formatted logging instead of standard panic behavior
