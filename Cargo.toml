@@ -13,8 +13,7 @@ daisy = { version = "0.11", features = ["seed_1_1"] }
 defmt = "1.0" # Logging framework
 defmt-rtt = "1.0" # Transport layer to send the logs over
 heapless = "0.8.0"
-libm = "0.2.15"
-nb = "1.1.0"
+micromath = "2.1.0"
 panic-probe = { version = "1.0", features = [
     "print-defmt",
 ] } # Panic handler for probe-rs

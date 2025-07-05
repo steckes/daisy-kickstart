@@ -147,8 +147,7 @@ dependencies = [
  "defmt",
  "defmt-rtt",
  "heapless 0.8.0",
- "libm",
- "nb 1.1.0",
+ "micromath",
  "panic-probe",
  "stm32h7xx-hal",
  "systick-monotonic",
@@ -294,12 +293,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "libm"
-version = "0.2.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9fbbcab51052fe104eb5e5d351cf728d30a5be1fe14d9be8a3b097481fb97de"
-
-[[package]]
 name = "lock_api"
 version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -308,6 +301,12 @@ dependencies = [
  "autocfg",
  "scopeguard",
 ]
+
+[[package]]
+name = "micromath"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3c8dda44ff03a2f238717214da50f65d5a53b45cd213a7370424ffdb6fae815"
 
 [[package]]
 name = "nb"

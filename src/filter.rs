@@ -1,5 +1,6 @@
 // Filter
 use core::f32;
+use micromath::F32Ext;
 
 #[derive(Debug)]
 pub enum FilterError {
@@ -62,7 +63,7 @@ impl Coefficients {
         let mut coeffs = Coefficients::default();
         match filter_type {
             FilterType::Lowpass => {
-                let g = libm::tanf(core::f32::consts::PI * params.frequency / sample_rate);
+                let g = (core::f32::consts::PI * params.frequency / sample_rate).tan();
                 let k = 1.0 / params.quality;
                 coeffs.a1 = 1.0 / (1.0 + g * (g + k));
                 coeffs.a2 = g * coeffs.a1;
@@ -72,8 +73,8 @@ impl Coefficients {
                 coeffs.m2 = 1.0;
             }
             FilterType::Bell => {
-                let a = libm::powf(10.0, params.gain / 40.0);
-                let g = libm::tanf(core::f32::consts::PI * params.frequency / sample_rate);
+                let a = 10_f32.powf(params.gain / 40.0);
+                let g = (core::f32::consts::PI * params.frequency / sample_rate).tan();
                 let k = 1.0 / (params.quality * a);
                 coeffs.a1 = 1.0 / (1.0 + g * (g + k));
                 coeffs.a2 = g * coeffs.a1;
