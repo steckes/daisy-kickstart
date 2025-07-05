@@ -1,6 +1,3 @@
-//! Example of how to configure audio input output and implement a basic
-//! passthrough swapping left and right channels, using RTIC.
-//!
 //! Read https://rtic.rs to learn more about the framework.
 
 #![no_main]
