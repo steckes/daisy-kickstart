@@ -22,7 +22,7 @@ use stm32h7xx_hal::gpio::{Analog, Pin};
 
 use {defmt_rtt as _, panic_probe as _};
 
-// Global audio interface
+// Global Values
 static AUDIO_INTERFACE: Mutex<RefCell<Option<audio::Interface>>> = Mutex::new(RefCell::new(None));
 
 static PROCESSOR: Mutex<RefCell<Option<Processor>>> = Mutex::new(RefCell::new(None));
@@ -39,14 +39,15 @@ fn main() -> ! {
     let cp = cortex_m::Peripherals::take().unwrap();
     let dp = pac::Peripherals::take().unwrap();
 
+    // Initialize system
     let system = System::init(cp, dp);
     let audio_interface = system.audio_interface;
     let mut inputs = system.inputs;
 
-    // Initialize filters
+    // Initialize processor
     let processor = Processor::new();
 
-    // Store interface and initialize queue
+    // Store interface and processor in global statics
     cortex_m::interrupt::free(|cs| {
         AUDIO_INTERFACE.borrow(cs).replace(Some(audio_interface));
         PROCESSOR.borrow(cs).replace(Some(processor));
@@ -54,15 +55,16 @@ fn main() -> ! {
 
     // Main loop: read parameters
     loop {
-        // Read ADC value
+        // Read ADC values
         let new_params = inputs.filter_params();
 
+        // Update parameters
         cortex_m::interrupt::free(|cs| {
             let mut params = PARAMS.borrow(cs).borrow_mut();
             *params = new_params;
         });
 
-        // wait for next interrupt
+        // Wait for next interrupt
         cortex_m::asm::wfi();
     }
 }
@@ -85,37 +87,6 @@ fn DMA1_STR1() {
                 .unwrap();
         }
     });
-}
-
-struct Inputs {
-    pub adc1: Adc<ADC1, Enabled>,
-    pub pot1_pin: Pin<'C', 4, Analog>,
-    pub pot2_pin: Pin<'C', 0, Analog>,
-}
-
-impl Inputs {
-    fn filter_params(&mut self) -> FilterParams {
-        let knob1_raw: u32 = self.adc1.read(&mut self.pot1_pin).unwrap();
-        // Normalize 16-bit ADC (0..65535) to 0.0..1.0
-        let knob1_norm = knob1_raw as f32 / 65_535.0;
-
-        const MIN_FREQ: f32 = 20.0;
-        const MAX_FREQ: f32 = 20_000.0;
-        let frequency = MIN_FREQ * libm::powf(MAX_FREQ / MIN_FREQ, knob1_norm);
-
-        let knob2_raw: u32 = self.adc1.read(&mut self.pot2_pin).unwrap();
-        // Normalize 16-bit ADC (0..65535) to 0.0..1.0
-        let knob2_norm = knob2_raw as f32 / 65_535.0;
-        const MIN_Q: f32 = 0.1;
-        const MAX_Q: f32 = 6.0;
-        let quality = MIN_Q + (MAX_Q - MIN_Q) * knob2_norm;
-
-        FilterParams {
-            frequency,
-            quality,
-            gain: 0.0,
-        }
-    }
 }
 
 struct System {
@@ -145,7 +116,8 @@ impl System {
         )
         .enable();
         adc1.set_resolution(adc::Resolution::SixteenBit);
-        // Select ADC channel for the knob
+
+        // Select ADC channel for the pots
         let pot1_pin = pins.GPIO.PIN_21.into_analog();
         let pot2_pin = pins.GPIO.PIN_15.into_analog();
 
@@ -161,6 +133,37 @@ impl System {
         Self {
             inputs,
             audio_interface,
+        }
+    }
+}
+
+struct Inputs {
+    pub adc1: Adc<ADC1, Enabled>,
+    pub pot1_pin: Pin<'C', 4, Analog>,
+    pub pot2_pin: Pin<'C', 0, Analog>,
+}
+
+impl Inputs {
+    fn filter_params(&mut self) -> FilterParams {
+        let knob1_raw: u32 = self.adc1.read(&mut self.pot1_pin).unwrap();
+        // Normalize 16-bit ADC (0..65535) to 0.0..1.0
+        let knob1_norm = knob1_raw as f32 / 65_535.0;
+
+        const MIN_FREQ: f32 = 20.0;
+        const MAX_FREQ: f32 = 20_000.0;
+        let frequency = MIN_FREQ * libm::powf(MAX_FREQ / MIN_FREQ, knob1_norm);
+
+        let knob2_raw: u32 = self.adc1.read(&mut self.pot2_pin).unwrap();
+        // Normalize 16-bit ADC (0..65535) to 0.0..1.0
+        let knob2_norm = knob2_raw as f32 / 65_535.0;
+        const MIN_Q: f32 = 0.1;
+        const MAX_Q: f32 = 6.0;
+        let quality = MIN_Q + (MAX_Q - MIN_Q) * knob2_norm;
+
+        FilterParams {
+            frequency,
+            quality,
+            gain: 0.0,
         }
     }
 }

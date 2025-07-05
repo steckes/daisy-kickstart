@@ -1,12 +1,8 @@
 #![no_main]
 #![no_std]
 
-use core::hint::black_box;
-
-use daisy_kickstart::{
-    bench_time,
-    filter::{Filter, FilterType},
-};
+use daisy::audio::BLOCK_LENGTH;
+use daisy_kickstart::{US, bench_time, processor::Processor};
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
@@ -22,7 +18,7 @@ fn main() -> ! {
         .enable_dcache(&mut cortex_peripherals.CPUID);
 
     // Create two arrays of 32 floating-point numbers, all set to 1.0
-    let mut audio_buffer = [(1.0, 1.0); 32];
+    let mut audio_buffer = [(1.0, 1.0); BLOCK_LENGTH];
 
     // Get access to device-specific peripherals (board-level hardware)
     let device_peripherals = daisy::pac::Peripherals::take().unwrap();
@@ -36,31 +32,18 @@ fn main() -> ! {
     // Get the system clock frequency in Hz
     let system_clock_frequency_hz = clock_configuration.clocks.sys_ck().to_Hz();
 
-    let mut filters = [
-        Filter::new(FilterType::Lowpass),
-        Filter::new(FilterType::Lowpass),
-    ];
+    // Initialize the processor
+    let mut processor = Processor::new();
 
     // Benchmark the dot product calculation and measure execution time
-    let execution_time = bench_time!(
-        cortex_peripherals,
-        {
-            for frame in audio_buffer.iter_mut() {
-                let (left, right) = *frame;
+    let execution_time = bench_time!(cortex_peripherals, system_clock_frequency_hz, {
+        processor.process(&mut audio_buffer);
+    });
 
-                // Apply filters to each channel
-                let filtered_left = filters[0].tick(left);
-                let filtered_right = filters[1].tick(right);
+    let process_time = BLOCK_LENGTH as f32 / daisy::audio::FS.to_Hz() as f32;
 
-                // Update the frame with filtered audio
-                *frame = (filtered_left, filtered_right);
-            }
-        },
-        system_clock_frequency_hz,
-        ns // Return result in microseconds (possible values: ms, us, ns)
-    );
-
-    defmt::println!("Time: {} ns", execution_time);
+    defmt::println!("Time: {} us", execution_time * US as f32);
+    defmt::println!("Time available: {} us", process_time * US as f32);
 
     // Loop infinite
     loop {

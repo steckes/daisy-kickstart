@@ -93,7 +93,7 @@ mod app {
             processor.update(params);
         }
 
-        // process the aud
+        // process audio
         audio_interface
             .handle_interrupt_dma1_str1(|audio_buffer| {
                 processor.process(audio_buffer);

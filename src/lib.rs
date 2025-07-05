@@ -8,6 +8,10 @@ use panic_probe as _;
 pub mod filter;
 pub mod processor;
 
+pub const MS: u32 = 1_000;
+pub const US: u32 = 1_000_000;
+pub const NS: u32 = 1_000_000_000;
+
 // Custom panic handler to avoid duplicate panic messages
 // Uses defmt for formatted logging instead of standard panic behavior
 #[defmt::panic_handler]
@@ -72,19 +76,18 @@ macro_rules! bench_cycles {
 ///
 /// # Arguments
 /// * `$cp` - Cortex peripherals (cortex_m::Peripherals)
-/// * `$x` - Expression to measure
 /// * `$sysclk_hz` - System clock frequency in Hz
-/// * Unit: `us` (microseconds), `ns` (nanoseconds), or `ms` (milliseconds)
+/// * `$x` - Expression to measure
 ///
 /// # Returns
-/// Execution time as `u64` in specified unit
+/// Execution time as `f32` in seconds
 ///
 /// # Example
 /// ```rust
 /// let cp = cortex_m::Peripherals::take().unwrap();
-/// let time_us = op_time_diff_unit!(cp, {
+/// let time_s = bench_time!(cp, 480_000_000, {
 ///     for i in 0..1000 { cortex_m::asm::nop(); }
-/// }, 400_000_000, us);
+/// });
 /// ```
 ///
 /// # Notes
@@ -93,16 +96,8 @@ macro_rules! bench_cycles {
 /// - Minimal overhead but some measurement artifacts exist
 #[macro_export]
 macro_rules! bench_time {
-    ( $cp:expr, $x:expr, $sysclk_hz:expr, us ) => {{
+    ( $cp:expr, $sysclk_hz:expr, $x:expr ) => {{
         let cycles = $crate::bench_cycles!($cp, $x);
-        (cycles as u64 * 1_000_000) / ($sysclk_hz as u64)
-    }};
-    ( $cp:expr, $x:expr, $sysclk_hz:expr, ns ) => {{
-        let cycles = $crate::bench_cycles!($cp, $x);
-        (cycles as u64 * 1_000_000_000) / ($sysclk_hz as u64)
-    }};
-    ( $cp:expr, $x:expr, $sysclk_hz:expr, ms ) => {{
-        let cycles = $crate::bench_cycles!($cp, $x);
-        (cycles as u64 * 1_000) / ($sysclk_hz as u64)
+        (cycles as f32) / ($sysclk_hz as f32)
     }};
 }
